@@ -94,7 +94,7 @@ impl Upscale {
     }
 
     pub fn execute(args: &Args, frames_receiver: Receiver<Result<Frame, Error>>) -> Receiver<Result<Frame, Error>> {
-        let (sender, receiver) = bounded(Self::MAX_JOBS);
+        let (sender, receiver) = bounded(1);
         let this = Self::new(args, frames_receiver, sender);
         this.shutdown_flag.store(false, Ordering::SeqCst);
         this.start();

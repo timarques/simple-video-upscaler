@@ -2,12 +2,11 @@ use crate::error::Error;
 use crate::frame::Frame;
 use crate::args::Args;
 
-use std::time::Instant;
-use indicatif::{ProgressBar, ProgressStyle};
-use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
+use std::{fmt::Write, time::Instant};
+use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
 
 pub struct Progress {
-    frame_total: f64,
     duplicates: usize,
     progress_bar: ProgressBar,
     start_time: Instant,
@@ -22,14 +21,16 @@ impl Progress {
         frames_receiver: Receiver<Result<Frame, Error>>,
         sender: Sender<Result<Frame, Error>>
     ) -> Self {
-        let progress_bar = ProgressBar::new(args.frame_total as u64);
+        let progress_bar = ProgressBar::new(args.frame_count as u64);
         let progress_style = ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] [{eta}] {bar:40.cyan/blue} {percent}% [{pos}/{len}] {msg}").unwrap()
-            .progress_chars("##-");
+            .template("[{elapsed_precise}] [{eta_precise}] [{wide_bar:.white/green}] {pos}/{len} {percent} {msg}")
+            .unwrap()
+            .progress_chars("█▓▒░-")
+            .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
+            .with_key("percent", |state: &ProgressState, w: &mut dyn Write| write!(w, "({:.0}%)", state.fraction() * 100.0).unwrap());
         progress_bar.set_style(progress_style);
 
         Self {
-            frame_total: args.frame_total as f64,
             duplicates: 0,
             progress_bar,
             start_time: Instant::now(),
@@ -39,13 +40,13 @@ impl Progress {
     }
 
     fn update_progress(&mut self, frame: &Frame) {
-        let index = frame.index + frame.duplicates;
-        self.progress_bar.set_position(index as u64);
+        let progress = frame.index + frame.duplicates;
+        self.progress_bar.set_position(progress as u64);
         self.duplicates += frame.duplicates;
 
         let total_elapsed = self.start_time.elapsed();
-        let avg_fps = self.frame_total as f64 / total_elapsed.as_secs_f64();
-        let message = format!("[duplicates: {}] [fps: {:.2}]", self.duplicates, avg_fps);
+        let avg_fps = progress as f64 / total_elapsed.as_secs_f64();
+        let message = format!("[duplicates: {}] [fps: {:.0}]", self.duplicates, avg_fps);
         self.progress_bar.set_message(message);
     }
 
@@ -72,7 +73,7 @@ impl Progress {
     }
 
     pub fn execute(args: &Args, frames_receiver: Receiver<Result<Frame, Error>>) -> Receiver<Result<Frame, Error>> {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = bounded(1);
         Self::new(args, frames_receiver, sender).start();
         receiver
     }

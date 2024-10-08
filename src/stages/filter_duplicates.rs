@@ -1,7 +1,7 @@
 use crate::frame::Frame;
 use crate::error::Error;
 
-use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
 
 pub struct FilterDuplicates {
     previous_frame: Option<Frame>,
@@ -63,7 +63,7 @@ impl FilterDuplicates {
     }
 
     pub fn execute(frames_receiver: Receiver<Result<Frame, Error>>) -> Receiver<Result<Frame, Error>> {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = bounded(1);
         Self::new(frames_receiver, sender).start();
         return receiver
     }

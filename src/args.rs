@@ -6,6 +6,13 @@ use std::path::Path;
 use std::env;
 use std::process::Command;
 
+struct VideoInfo {
+    width: usize,
+    height: usize,
+    frame_rate: f64,
+    frame_count: usize,
+}
+
 pub struct Args {
     target_width: Option<usize>,
     target_height: Option<usize>,
@@ -13,7 +20,7 @@ pub struct Args {
     pub input: String,
     pub output: String,
     pub frame_rate: f64,
-    pub frame_total: usize,
+    pub frame_count: usize,
     pub width: usize,
     pub height: usize,
     pub model: RealCugan,
@@ -29,7 +36,7 @@ impl Args {
             target_width: None,
             target_height: None,
             frame_rate: 0.0,
-            frame_total: 0,
+            frame_count: 0,
             width: 0,
             height: 0,
             scale: 2,
@@ -38,10 +45,19 @@ impl Args {
         };
 
         args.parse_args()?;
-        args.validate_ffmpeg_binary()?;
-        args.validate_encoder()?;
         args.validate_paths()?;
-        args.set_frame_rate_total_and_resolution()?;
+        args.validate_ffmpeg_binary()?;
+        
+        let video_info_handle = args.get_video_info();
+        let validate_encoder_handle = args.validate_encoder();
+
+        validate_encoder_handle.join().unwrap()?;
+        let video_info = video_info_handle.join().unwrap()?;
+        args.frame_rate = video_info.frame_rate;
+        args.frame_count = video_info.frame_count;
+        args.width = video_info.width;
+        args.height = video_info.height;
+
         args.set_scale_and_resolution();
         args.set_model();
 
@@ -134,8 +150,8 @@ impl Args {
 
         let input = input.ok_or_else(|| Error::MissingArgument("input".to_string()))?;
         let output = output.ok_or_else(|| Error::MissingArgument("output".to_string()))?;
-        self.input = input;
-        self.output = output;
+        self.input = Path::new(&input).display().to_string();
+        self.output = Path::new(&output).display().to_string();
         self.target_width = target_width;
         self.target_height = target_height;
         self.encoder = encoder;
@@ -143,26 +159,37 @@ impl Args {
     }
 
     fn validate_ffmpeg_binary(&self) -> Result<(), Error> {
-        Command::new("ffmpeg")
-            .arg("-version")
-            .output()
-            .map(|_| ())
-            .map_err(|_| Error::FFmpegNotAvailable)
+        match Command::new("ffmpeg").spawn() {
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    Err(Error::FFmpegNotAvailable)
+                } else {
+                    Ok(())
+                }
+            },
+            Ok(mut c) => {
+                let _ = c.kill();
+                Ok(())
+            },
+        }
     }
 
-    fn validate_encoder(&self) -> Result<(), Error> {
-        let output = Command::new("ffmpeg")
-            .args(&["-encoders"])
-            .output()
-            .map_err(|_| Error::FfmpegFailed)?;
+    fn validate_encoder(&self) -> std::thread::JoinHandle<Result<(), Error>> {
+        let encoder = self.encoder.clone();
+        std::thread::spawn(move || -> Result<(), Error> {
+            let output = Command::new("ffmpeg")
+                .args(&["-encoders"])
+                .output()
+                .map_err(|_| Error::FfmpegFailed)?;
 
-        let encoders = String::from_utf8_lossy(&output.stdout);
-        
-        if !encoders.contains(&self.encoder) {
-            return Err(Error::UnsupportedEncoder(self.encoder.clone()));
-        }
+            let encoders = String::from_utf8_lossy(&output.stdout);
+            
+            if !encoders.contains(&encoder) {
+                return Err(Error::UnsupportedEncoder(encoder));
+            }
 
-        Ok(())
+            Ok(())
+        })
     }
 
     fn validate_paths(&self) -> Result<(), Error> {
@@ -184,37 +211,48 @@ impl Args {
         Ok(())
     }
 
-    fn set_frame_rate_total_and_resolution(&mut self) -> Result<(), Error> {
+    fn get_video_info(&self) -> std::thread::JoinHandle<Result<VideoInfo, Error>> {
+        let input_file = self.input.clone();
+        std::thread::spawn(move || {
             let output = Command::new("ffprobe")
-            .args(&[
-                "-v", "error",
-                "-select_streams", "v:0",
-                "-count_frames",
-                "-show_entries", "stream=nb_read_frames,r_frame_rate,width,height",
-                "-of", "default=noprint_wrappers=1",
-                &self.input,
-            ])
-            .output()?;
-    
-        let data = String::from_utf8_lossy(&output.stdout);
-    
-        for line in data.lines() {
-            if line.starts_with("nb_read_frames=") {
-                self.frame_total = line.split('=').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-            } else if line.starts_with("r_frame_rate=") {
-                let fps_parts: Vec<&str> = line.split('=').nth(1).unwrap_or("").split('/').collect();
-                if fps_parts.len() == 2 {
-                    let num = fps_parts[0].parse::<f64>().unwrap_or(0.0);
-                    let den = fps_parts[1].parse::<f64>().unwrap_or(1.0);
-                    self.frame_rate = num / den;
+                .args(&[
+                    "-v", "error",
+                    "-select_streams", "v:0",
+                    "-count_frames",
+                    "-show_entries", "stream=nb_read_frames,r_frame_rate,width,height",
+                    "-of", "default=noprint_wrappers=1",
+                    &input_file,
+                ])
+                .output()?;
+
+            let mut video_info = VideoInfo {
+                width: 0,
+                height: 0,
+                frame_count: 0,
+                frame_rate: 0.0
+            };
+
+            let data = String::from_utf8_lossy(&output.stdout);
+        
+            for line in data.lines() {
+                if line.starts_with("nb_read_frames=") {
+                    video_info.frame_count = line.split('=').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                } else if line.starts_with("r_frame_rate=") {
+                    let fps_parts: Vec<&str> = line.split('=').nth(1).unwrap_or("").split('/').collect();
+                    if fps_parts.len() == 2 {
+                        let num = fps_parts[0].parse::<f64>().unwrap_or(0.0);
+                        let den = fps_parts[1].parse::<f64>().unwrap_or(1.0);
+                        video_info.frame_rate = num / den;
+                    }
+                } else if line.starts_with("width=") {
+                    video_info.width = line.split('=').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                } else if line.starts_with("height=") {
+                    video_info.height = line.split('=').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
                 }
-            } else if line.starts_with("width=") {
-                self.width = line.split('=').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-            } else if line.starts_with("height=") {
-                self.height = line.split('=').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
             }
-        }
-        Ok(())
+
+            Ok(video_info)
+        })
     }
 
     fn determine_target_dimensions(&self, original_aspect_ratio: f64) -> (usize, usize) {

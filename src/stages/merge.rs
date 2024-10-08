@@ -2,8 +2,8 @@ use crate::frame::Frame;
 use crate::error::Error;
 use crate::args::Args;
 
-use std::io::{Read, Write};
-use std::process::{Child, ChildStderr, ChildStdin, Command, Stdio};
+use std::io::Write;
+use std::process::{Child, ChildStdin, Command, Stdio};
 use crossbeam_channel::{Receiver, TryRecvError};
 
 pub struct Merge {
@@ -33,8 +33,7 @@ impl Merge {
     fn spawn_ffmpeg_process(&self) -> Result<Child, Error> {
         Command::new("ffmpeg")
             .args(&[
-                "-hide_banner",
-                "-loglevel", "error",
+                "-thread_queue_size", "1024",
                 "-i", &self.input_file,
                 "-threads", "1",
                 "-r", &self.frame_rate.to_string(),
@@ -48,18 +47,17 @@ impl Merge {
                 "-map", "0:s?",
                 "-vf", &format!("scale={}x{}", &self.width, &self.height),
                 "-c:v", &self.encoder,
-                "-preset", "slow",
                 "-y",
                 &self.outpu_file
             ])
             .stdin(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .stdout(Stdio::null())
             .spawn()
             .map_err(Error::Io)
     }
 
-    fn process_stdin(&self, mut stdin: ChildStdin, mut stderr: ChildStderr) -> Result<(), Error> {
+    fn process_stdin(&self, mut stdin: ChildStdin) -> Result<(), Error> {
         loop {
             match self.receiver.try_recv() {
                 Ok(Ok(frame)) => {
@@ -73,11 +71,7 @@ impl Merge {
                 Err(TryRecvError::Disconnected) => {
                     let _ = stdin.flush();
                     drop(stdin);
-                    if stderr.read(&mut [0u8; 10]).unwrap_or(0) > 0 {
-                        return Err(Error::FfmpegFailed);
-                    } else {
-                        return Ok(())
-                    }
+                    return Ok(())
                 },
             }
         }
@@ -86,8 +80,7 @@ impl Merge {
     fn start(&self) -> Result<(), Error> {
         let mut child = self.spawn_ffmpeg_process()?;
         let stdin = child.stdin.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
-        let result = self.process_stdin(stdin, stderr);
+        let result = self.process_stdin(stdin);
         let _ = child.kill();
         let _ = child.wait();
         result

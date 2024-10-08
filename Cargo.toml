@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-crossbeam-channel = "0.5.13"
-image = "0.25.2"
-indicatif = "0.17.8"
 realcugan-rs = { git = "https://github.com/timarques/realcugan_rs", version = "1.0.0", features = ["models-se"] }
+image = { version = "0.25.2", default-features = false, features = ["png"]}
+crossbeam-channel = "0.5.13"
+indicatif = "0.17.8"
 thiserror = "1.0.64"
 
 [profile.release]

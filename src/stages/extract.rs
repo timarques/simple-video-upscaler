@@ -2,7 +2,7 @@ use crate::frame::Frame;
 use crate::error::Error;
 use crate::args::Args;
 
-use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::io::Read;
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -27,18 +27,17 @@ impl Extract {
     }
 
     fn find_png_footer(data: &[u8]) -> Option<usize> {
-        data.windows(Self::PNG_FOOTER_SIGNATURE.len())
+        data.windows(12)
             .rposition(|window| window == Self::PNG_FOOTER_SIGNATURE)
-            .map(|pos| pos + Self::PNG_FOOTER_SIGNATURE.len())
+            .map(|pos| pos + 12)
     }
 
     fn spawn_ffmpeg_process(&self) -> Result<Child, Error> {
         Command::new("ffmpeg")
             .args(&[
-                "-hide_banner",
-                "-loglevel", "error",
                 "-r", "1",
                 "-i", &self.input_file,
+                "-thread_queue_size", "1024",
                 "-threads", "1",
                 "-q:v", "1",
                 "-vcodec", "png",
@@ -46,7 +45,7 @@ impl Extract {
                 "pipe:1"
             ])
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .stdin(Stdio::null())
             .spawn()
             .map_err(|_| Error::FfmpegFailed)
@@ -74,16 +73,13 @@ impl Extract {
         }
     }
 
-    fn process_stdout(&self, mut stdout: ChildStdout, mut stderr: ChildStderr) {
+    fn process_stdout(&self, mut stdout: ChildStdout) {
         let mut frame_buffer = Vec::new();
         let mut read_chunk = vec![0u8; Self::CHUNK_SIZE];
 
         loop {
             match self.process_chunk(&mut frame_buffer, &mut read_chunk, &mut stdout) {
                 Ok(None) => {
-                    if stderr.read(&mut [0u8; 10]).unwrap_or(0) > 0 {
-                        let _ = self.sender.send(Err(Error::FfmpegFailed));
-                    }
                     break
                 },
                 Ok(Some(frame)) => {
@@ -102,11 +98,10 @@ impl Extract {
     fn start(self) -> Result<(), Error> {
         let mut child = self.spawn_ffmpeg_process()?;
         let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
         self.is_closed.store(false, Ordering::SeqCst);
 
         thread::spawn(move || {
-            self.process_stdout(stdout, stderr);
+            self.process_stdout(stdout);
             self.is_closed.store(true, Ordering::SeqCst);
 
             let _ = child.kill();
