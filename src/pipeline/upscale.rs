@@ -1,30 +1,33 @@
 use crate::frame::Frame;
 use crate::error::Error;
 use crate::video::Video;
+use crate::model::Upscaler;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
-use realcugan_rs::RealCugan;
 
 pub struct Upscale;
 
 impl Upscale {
 
-    const MAX_JOBS: usize = 4;
+    const MAX_JOBS: usize = 2;
 
     fn process_frame(
         mut frame: Frame,
         processing: &Arc<Mutex<Vec<usize>>>,
-        model: &RealCugan,
+        upscaler: &Arc<dyn Upscaler>,
         shutdown_flag: &Arc<AtomicBool>,
     ) -> Result<Option<Frame>, Error> {
         processing.lock().expect("Failed to lock queue").push(frame.index);
-        frame.image = model
-            .process_image(frame.image)
-            .map_err(|e| Error::UpscaleError(e.to_string()))?;
+        let width = frame.image.width();
+        let height = frame.image.height();
+        let frame_pixels = frame.image.to_rgba8().into_raw();
+        let upscaled_pixels = upscaler.upscale(&frame_pixels, width as usize, height as usize)?;
+        let upscaled_image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(width, height, upscaled_pixels).unwrap());
+        frame.image = upscaled_image;
         
         loop {
             let min_index = {
@@ -46,14 +49,14 @@ impl Upscale {
     fn process_incoming_frames(
         receiver: Receiver<Result<Frame, Error>>,
         sender: Sender<Result<Frame, Error>>,
-        model: RealCugan,
+        upscaler: Arc<dyn Upscaler>,
     ) {
         let processing = Arc::new(Mutex::new(Vec::new()));
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         while !shutdown_flag.load(Ordering::SeqCst) {
             match receiver.try_recv() {
                 Ok(Ok(frame)) => {
-                    match Self::process_frame(frame, &processing, &model, &shutdown_flag) {
+                    match Self::process_frame(frame, &processing, &upscaler, &shutdown_flag) {
                         Ok(Some(processed_frame)) => {
                             if sender.send(Ok(processed_frame)).is_err() {
                                 break;
@@ -80,11 +83,12 @@ impl Upscale {
     pub fn execute(video: &Video, frames_receiver: Receiver<Result<Frame, Error>>) -> Receiver<Result<Frame, Error>> {
         let (sender, receiver) = bounded(1);
         let model = video.model.as_ref().unwrap();
+        let upscaler = model.create();
         for _ in 0..Self::MAX_JOBS {
-            let model = model.clone();
+            let upscaler = upscaler.clone();
             let sender = sender.clone();
             let frames_receiver = frames_receiver.clone();
-            thread::spawn(move || Self::process_incoming_frames(frames_receiver, sender, model));
+            thread::spawn(move || Self::process_incoming_frames(frames_receiver, sender, upscaler));
         }
         receiver
     }

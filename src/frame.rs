@@ -42,7 +42,6 @@ impl Frame {
         if (width, height) != frame.image.dimensions() {
             return false;
         }
-    
         self.image.pixels().zip(frame.image.pixels()).all(|(p1, p2)| p1 == p2)
     }
 }

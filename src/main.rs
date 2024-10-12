@@ -3,6 +3,7 @@ mod error;
 mod pipeline;
 mod arguments;
 mod video;
+mod model;
 
 use arguments::Arguments;
 use pipeline::Pipeline;

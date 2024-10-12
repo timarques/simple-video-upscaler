@@ -10,12 +10,13 @@ It allows users to input a video, specify target resolution, and output format u
 **Usage: simple_upscaler [OPTIONS]**
 
 #### Options:
-- -i, --input FILE Input video file
-- -o, --output FILE Output video file
-- --width WIDTH Target width (optional)
-- --height HEIGHT Target height (optional)
-- --encoder ENCODER Video encoder (default: libx264)
-- -h, --help Show this help message
+- -i, --input FILE/DIRECTORY Input video file
+- -o, --output FILE/DIRECTORY Output video file
+- -w, --width WIDTH Target width (optional)
+- -h, --height HEIGHT Target height (optional)
+- -e, --encoder ENCODER Video encoder (default: libx264)
+- -s, --scale SCALE Video scale factor(default: 2)
+- --help Show this help message
 
 ## Requirements
 

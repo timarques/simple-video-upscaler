@@ -1,17 +1,17 @@
 use crate::error::Error;
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{exit, Command};
 
 pub struct Arguments {
     input: String,
     output: Option<String>,
     formats: Vec<String>,
-    pub scale: usize,
     pub files: Vec<(String, String)>,
     pub width: Option<usize>,
     pub height: Option<usize>,
     pub encoder: String,
+    pub model: String
 }
 
 impl Default for Arguments {
@@ -29,7 +29,7 @@ impl Default for Arguments {
             encoder: String::from("libx264"),
             files: Vec::new(),
             formats,
-            scale: 2,
+            model: String::from("realesrgan"),
         }
     }
 }
@@ -41,6 +41,7 @@ impl Arguments {
         arguments.check_ffmpeg()?;
         arguments.parse_arguments()?;
         arguments.validate_encoder()?;
+        arguments.validate_model()?;
         arguments.validate_resolution_and_scale()?;
         arguments.set_input_files()?;
         arguments.set_output_files()?;
@@ -50,6 +51,10 @@ impl Arguments {
 
     fn parse_arguments(&mut self) -> Result<(), Error> {
         let args: Vec<String> = std::env::args().collect();
+
+        if args.len() < 2 {
+            Self::print_help();
+        }
         
         let mut i = 1;
         while i < args.len() {
@@ -59,15 +64,11 @@ impl Arguments {
                 "-w" | "--width" => self.width = Some(self.parse_numeric_arg(&args, &mut i, "width")?),
                 "-h" | "--height" => self.height = Some(self.parse_numeric_arg(&args, &mut i, "height")?),
                 "-e" | "--encoder" => self.encoder = self.get_next_arg(&args, &mut i, "encoder")?,
-                "-s" | "--scale" => self.scale = self.parse_numeric_arg(&args, &mut i, "scale")?,
+                "-m" | "--model" => self.model = self.get_next_arg(&args, &mut i, "model")?,
                 "--help" => Self::print_help(),
-                _ => Self::print_help(),
+                _ => return Err(Error::InvalidArgument(args[i].to_string())),
             }
             i += 1;
-        }
-
-        if self.width.is_some() || self.height.is_some() {
-            self.scale = 0;
         }
 
         Ok(())
@@ -85,14 +86,17 @@ impl Arguments {
 
     fn print_help() {
         println!("Usage: program_name [OPTIONS]");
+        println!();
         println!("Options:");
-        println!("  -i, --input FILE      Input video file or directory");
-        println!("  -o, --output FILE     Output video file");
-        println!("  -w, --width WIDTH     Target width");
-        println!("  -h, --height HEIGHT   Target height");
-        println!("  -s, --scale SCALE     Scale factor");
-        println!("  -e, --encoder ENCODER Video encoder (default: libx264)");
-        println!("  -h, --help            Show this help message");
+        println!("  -i, --input FILE         Specify the input video file or directory");
+        println!("  -o, --output FILE        Specify the output video file");
+        println!("  -w, --width WIDTH        Set the target video width (in pixels)");
+        println!("  -h, --height HEIGHT      Set the target video height (in pixels)");
+        println!("  -e, --encoder ENCODER    Choose the video encoder (default: libx264)");
+        println!("  -m, --model MODEL        Select the AI model for upscaling: (default: realesrgan)");
+        println!("                           realcugan | realesrgan | realesrgan-anime");
+        println!("      --help               Display this help message and exit");
+        exit(0);
     }
 
     fn set_input_files(&mut self) -> Result<(), Error> {
@@ -206,6 +210,13 @@ impl Arguments {
         }
     }
 
+    fn validate_model(&self) -> Result<(), Error> {
+        match self.model.as_str() {
+            "realcugan" | "realesrgan" | "realesrgan-anime" => Ok(()),
+            _ => Err(Error::InvalidArgument(format!("model must be realcugan, realesrgan, or realesrgan-anime, got {}", self.model))),
+        }
+    }
+
     fn validate_resolution_and_scale(&mut self) -> Result<(), Error> {
         if let Some(width) = self.width {
             if width < 16 || width > 7680 {
@@ -216,15 +227,6 @@ impl Arguments {
         if let Some(height) = self.height {
             if height < 16 || height > 4320 {
                 return Err(Error::InvalidArgument(format!("height must be between 16 and 4320, got {}", height)));
-            }
-        }
-    
-        if self.scale > 0 {
-            if self.width.is_some() || self.height.is_some() {
-                return Err(Error::MixedArguments("scale".to_string(), "width/height".to_string()));
-            }
-            if ![1, 2, 3, 4].contains(&self.scale) {
-                return Err(Error::InvalidArgument(format!("scale must be 1, 2, 3, or 4, got {}", self.scale)));
             }
         }
     

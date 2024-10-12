@@ -1,7 +1,7 @@
 use crate::arguments::Arguments;
+use crate::model::Model;
 use crate::error::Error;
 
-use realcugan_rs::{RealCugan, Model};
 use std::process::Command;
 
 #[derive(Clone)]
@@ -10,8 +10,7 @@ pub struct Video<'a> {
     pub height: usize,
     pub frame_rate: f64,
     pub frame_count: usize,
-    pub model: Option<RealCugan>,
-    pub scale: usize,
+    pub model: Option<Model>,
     pub input: &'a str,
     pub output: &'a str,
     pub encoder: &'a str,
@@ -25,15 +24,13 @@ impl<'a> Video<'a> {
             frame_rate: 0.0,
             frame_count: 0,
             model: None,
-            scale: arguments.scale,
             input,
             output,
             encoder: &arguments.encoder,
         };
 
         video.fetch_video_metadata()?;
-        video.apply_scaling_and_resolution(arguments);
-        video.set_model();
+        video.set_model_and_resolution(arguments);
 
         Ok(video)
     }
@@ -78,25 +75,33 @@ impl<'a> Video<'a> {
         }
     }
 
-    fn apply_scaling_and_resolution(&mut self, arguments: &Arguments) {
-        if self.scale == 0 {
-            let original_aspect_ratio = self.width as f64 / self.height as f64;
-            let (target_width, target_height) = self.calculate_target_dimensions(arguments, original_aspect_ratio);
-            let (final_width, final_height) = self.adjust_for_aspect_ratio(target_width, target_height, original_aspect_ratio);
+    fn set_model_and_resolution(&mut self, arguments: &Arguments) {
+        let original_aspect_ratio = self.width as f64 / self.height as f64;
+        let (target_width, target_height) = self.calculate_target_dimensions(arguments, original_aspect_ratio);
+        let (final_width, final_height) = self.adjust_for_aspect_ratio(target_width, target_height, original_aspect_ratio);
 
-            self.scale = 1 + (0..=3).rev()
-                .find(|&scale| final_width >= self.width * scale || final_height >= self.height * scale)
-                .unwrap_or(1);
-            
-
-            self.width = final_width.min(final_width * self.scale);
-            self.height = final_height.min(final_height * self.scale);
-
-            self.warn_if_resolution_adjusted(arguments, final_width, final_height);
+        let scale = if arguments.model != "realcugan" {
+            4
         } else {
-            self.width = self.width * self.scale;
-            self.height = self.height * self.scale;
+            1 + (0..=3).rev()
+            .find(|&scale| final_width >= self.width * scale || final_height >= self.height * scale)
+            .unwrap_or(1)
+        };
+
+        self.width = final_width.min(final_width * scale);
+        self.height = final_height.min(final_height * scale);
+
+        if scale < 2 {
+            self.model = None;
+        } else if arguments.model == "realcugan" {
+            self.model = Some(Model::RealCugan(scale));
+        } else if arguments.model == "realesrgan" {
+            self.model = Some(Model::RealEsrgan);
+        } else if arguments.model == "realesrgan-anime" {
+            self.model = Some(Model::RealEsrganAnime);
         }
+
+        self.warn_if_resolution_adjusted(arguments, final_width, final_height);
     }
 
     fn calculate_target_dimensions(&self, arguments: &Arguments, original_aspect_ratio: f64) -> (usize, usize) {
@@ -137,12 +142,4 @@ impl<'a> Video<'a> {
         }
     }
 
-    fn set_model(&mut self) {
-        self.model = match self.scale {
-            2 => Some(RealCugan::from_model(Model::Se2xConservative)),
-            3 => Some(RealCugan::from_model(Model::Se3xConservative)),
-            4 => Some(RealCugan::from_model(Model::Se4xConservative)),
-            _ => None,
-        };
-    }
 }

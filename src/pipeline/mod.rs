@@ -20,7 +20,7 @@ impl Pipeline {
     pub fn execute(arguments: Arguments) -> Result<(), Error> {
         for (input, output) in &arguments.files {
             let video = Video::new(&arguments, input, output)?;
-            if video.scale == 1 {
+            if video.model.is_none() {
                 println!("Skipping {}", input);
                 continue
             }

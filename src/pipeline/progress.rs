@@ -15,7 +15,13 @@ impl Progress {
         let progress_bar = ProgressBar::new(video.frame_count as u64);
         let progress_template = "[{elapsed_precise}] [{eta_precise}] [{wide_bar:.white/green}] {pos}/{len} {percent} {msg}";
         let file_template = format!("{} -> {}", video.input, video.output);
-        let options_template = format!("[resolutin: {}x{}] [scale: {}] [encoder: {}]", video.width, video.height, video.scale, video.encoder);
+        let options_template = format!(
+            "[resolutin: {}x{}] [model: {}] [encoder: {}]", 
+            video.width,
+            video.height,
+            video.model.unwrap().to_string(),
+            video.encoder
+        );
         let progress_style = ProgressStyle::default_bar()
             .template(&format!("{}\n{}\n{}", file_template, options_template, progress_template))
             .unwrap()

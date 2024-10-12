@@ -27,6 +27,7 @@ impl Extract {
             .args(&[
                 "-r", "1", 
                 "-i", &video.input,
+                "-pix_fmt", "rgba",
                 "-q:v", "1",
                 "-vcodec", "png",
                 "-f", "image2pipe",

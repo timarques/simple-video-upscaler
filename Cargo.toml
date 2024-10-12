@@ -4,11 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-realcugan-rs = { git = "https://github.com/timarques/realcugan_rs", version = "1.0.0", features = ["models-se"] }
-image = { version = "0.25.2", default-features = false, features = ["png"]}
+image = { version = "0.25.2", default-features = false, features = ["png"] }
 crossbeam-channel = "0.5.13"
 indicatif = "0.17.8"
 thiserror = "1.0.64"
+
+[dependencies.realcugan_rs]
+git = "https://github.com/timarques/realcugan_rs"
+default-features = false
+features = ["models-se"]
+
+[dependencies.realesrgan_rs]
+git = "https://github.com/timarques/realesrgan_rs"
+default-features = false
+features = ["model-realesr-animevideov3", "model-realesrgan-plus", "model-realesrgan-plus-anime"]
 
 [profile.release]
 lto = true
