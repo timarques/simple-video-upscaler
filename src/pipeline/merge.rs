@@ -62,10 +62,10 @@ impl Merge {
         let mut child = Self::spawn_ffmpeg_process(video)?;
         let stdin = child.stdin.take().unwrap();
         let result = Self::process_stdin(stdin, receiver);
-        let _ = child.wait();
         if result.is_err() {
             let _ = child.kill();
         }
+        let _ = child.wait();
         result
     }
 

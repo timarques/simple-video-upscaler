@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::video::Video;
 
 use std::process::{Child, ChildStdout, Command, Stdio};
-use std::io::Read;
+use std::io::{Read, BufReader};
 use std::thread;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -25,7 +25,8 @@ impl Extract {
     fn spawn_ffmpeg_process(video: &Video) -> Result<Child, Error> {
         Command::new("ffmpeg")
             .args(&[
-                "-r", "1", 
+                "-r", "1",
+                "-threads", "1",
                 "-i", &video.input,
                 "-pix_fmt", "rgb8",
                 "-q:v", "1",
@@ -44,9 +45,10 @@ impl Extract {
     fn process_chunk(
         frame_buffer: &mut Vec<u8>,
         read_chunk: &mut Vec<u8>,
-        stdout: &mut ChildStdout,
+        buff_reader: &mut BufReader<&mut ChildStdout>,
+        frame_count: usize
     ) -> Result<Option<Frame>, Error> {
-        let size = stdout
+        let size = buff_reader
             .read(read_chunk)
             .map_err(|e| Error::new(format!("Failed to read chunk: {}", e)))?;
         if size == 0 {
@@ -55,24 +57,27 @@ impl Extract {
         frame_buffer.extend_from_slice(&read_chunk[..size]);
         if let Some(index) = Self::find_png_footer(&frame_buffer) {
             let bytes: Vec<u8> = frame_buffer.drain(..index).collect();
-            let frame = Frame::from_bytes(&bytes)?;
+            let frame = Frame::from_bytes(frame_count, &bytes)?;
             Ok(Some(frame))
         } else if frame_buffer.len() > Self::MAX_FRAME_BUFFER_SIZE {
             Err(Error::new(format!("Frame buffer is too large: {}", frame_buffer.len())))
         } else {
-            Self::process_chunk(frame_buffer, read_chunk, stdout)
+            Self::process_chunk(frame_buffer, read_chunk, buff_reader, frame_count)
         }
     }
 
     fn process_stdout(mut stdout: ChildStdout, sender: Sender<Result<Frame, Error>>) {
         let mut frame_buffer = Vec::new();
         let mut read_chunk = vec![0u8; Self::CHUNK_SIZE];
+        let mut buff_reader = BufReader::new(&mut stdout);
+        let mut frame_count = 0;
         loop {
-            match Self::process_chunk(&mut frame_buffer, &mut read_chunk, &mut stdout) {
+            match Self::process_chunk(&mut frame_buffer, &mut read_chunk, &mut buff_reader, frame_count) {
                 Ok(None) => {
                     break
                 },
                 Ok(Some(frame)) => {
+                    frame_count += 1;
                     if sender.send(Ok(frame)).is_err() {
                         break
                     }
@@ -83,6 +88,7 @@ impl Extract {
                 }
             }
         }
+        drop(stdout);
     }
 
     pub fn execute(video: &Video) -> Result<Receiver<Result<Frame, Error>>, Error> {

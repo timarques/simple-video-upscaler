@@ -92,6 +92,20 @@ impl Upscale {
         })
     }
 
+    fn send_processed_frames(
+        sender: &Sender<Result<Frame, Error>>,
+        processed_frames: &mut BTreeMap<usize, Frame>,
+        next_frame_index: &Arc<AtomicUsize>,
+    ) {
+        while let Some(frame) = processed_frames.remove(&next_frame_index.load(Ordering::SeqCst)) {
+            let duplicates = frame.duplicates;
+            if sender.send(Ok(frame)).is_err() {
+                return;
+            }
+            next_frame_index.fetch_add(1 + duplicates, Ordering::SeqCst);
+        }
+    }
+
     fn process_incoming_frames(
         receiver: Receiver<Result<Frame, Error>>,
         sender: Sender<Result<Frame, Error>>,
@@ -99,27 +113,21 @@ impl Upscale {
         scale: u8,
         next_frame_index: Arc<AtomicUsize>,
         processed_frames: Arc<Mutex<BTreeMap<usize, Frame>>>,
-    ) {
+    ) { 
         while let Ok(frame_result) = receiver.recv() {
-            match frame_result {
+            let processed_frame = match frame_result {
+                Ok(frame) => Self::process_frame(frame, &upscaler, scale),
+                Err(e) => {
+                    let _ = sender.send(Err(e));
+                    return;
+                }
+            };
+    
+            match processed_frame {
                 Ok(frame) => {
-                    match Self::process_frame(frame, &upscaler, scale) {
-                        Ok(processed_frame) => {
-                            let mut processed_frames = processed_frames.lock().unwrap();
-                            processed_frames.insert(processed_frame.index, processed_frame);
-                            while let Some(frame) = processed_frames.remove(&next_frame_index.load(Ordering::SeqCst)) {
-                                let duplicates = frame.duplicates;
-                                if sender.send(Ok(frame)).is_err() {
-                                    return;
-                                }
-                                next_frame_index.fetch_add(1 + duplicates, Ordering::SeqCst);
-                            }
-                        }
-                        Err(e) => {
-                            let _ = sender.send(Err(e));
-                            return;
-                        }
-                    }
+                    let mut processed_frames = processed_frames.lock().unwrap();
+                    processed_frames.insert(frame.index, frame);
+                    Self::send_processed_frames(&sender, &mut processed_frames, &next_frame_index);
                 }
                 Err(e) => {
                     let _ = sender.send(Err(e));
