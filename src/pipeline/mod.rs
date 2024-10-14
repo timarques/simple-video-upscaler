@@ -25,8 +25,8 @@ impl Pipeline {
                 continue
             }
             let extract = Extract::execute(&video)?;
-            let filter_duplicates = FilterDuplicates::execute(extract);
-            let upscale = Upscale::execute(&video, filter_duplicates);
+            let filter_duplicates = FilterDuplicates::execute(&video, extract);
+            let upscale = Upscale::execute(&video, filter_duplicates)?;
             let progress = Progress::execute(&video, upscale);
             Merge::execute(&video, progress)?;
         }

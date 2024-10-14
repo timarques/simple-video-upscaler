@@ -1,28 +1,82 @@
 use crate::frame::Frame;
 use crate::error::Error;
 use crate::video::Video;
-use crate::model::Upscaler;
+use crate::model::Model;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::collections::BTreeMap;
 
-use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{bounded, Receiver, Sender};
+use realcugan_rs::{RealCugan, Options as RealCuganOptions, OptionsModel as RealCuganOptionsModel};
+use realesrgan_rs::{RealEsrgan, Options as RealEsrganOptions, OptionsModel as RealEsrganOptionsModel};
+
+trait Upscaler: Sync + Send {
+    fn upscale(&self, input: &[u8], width: usize, height: usize) -> Result<Vec<u8>, Error>;
+}
+
+impl Upscaler for RealCugan {
+    fn upscale(&self, input: &[u8], width: usize, height: usize) -> Result<Vec<u8>, Error> {
+        self.process(input, width, height).map_err(|e| Error::new(format!("RealCugan upscale failed: {}", e)))
+    }
+}
+
+impl Upscaler for RealEsrgan {
+    fn upscale(&self, input: &[u8], width: usize, height: usize) -> Result<Vec<u8>, Error> {
+        self.process(input, width, height).map_err(|e| Error::new(format!("RealEsrgan upscale failed: {}", e)))
+    }
+}
 
 pub struct Upscale;
 
 impl Upscale {
-
     const MAX_JOBS: usize = 4;
 
+    fn init_upscaler(model: &Model) -> Result<Arc<dyn Upscaler>, Error> {
+        match model {
+            Model::RealCugan(scale) => {
+                let options = RealCuganOptions::default().model(match scale {
+                    2 => RealCuganOptionsModel::Se2xConservative,
+                    3 => RealCuganOptionsModel::Se3xConservative,
+                    4 => RealCuganOptionsModel::Se4xConservative,
+                    _ => return Err(Error::new(format!("Unsupported scale {} for RealCugan", scale))),
+                });
+                RealCugan::new(options)
+                    .map_err(|e| Error::new(format!("Failed to initialize RealCugan upscaler: {}", e)))
+                    .map(|r| Arc::new(r) as _)
+            },
+            Model::RealEsrAnime(scale) => {
+                let options = RealEsrganOptions::default().model(match scale {
+                    2 => RealEsrganOptionsModel::RealESRAnimeVideoV3x2,
+                    3 => RealEsrganOptionsModel::RealESRAnimeVideoV3x3,
+                    4 => RealEsrganOptionsModel::RealESRAnimeVideoV3x4,
+                    _ => return Err(Error::new(format!("Unsupported scale {} for RealEsrAnime", scale))),
+                });
+                RealEsrgan::new(options)
+                    .map_err(|e| Error::new(format!("Failed to initialize RealEsrAnime upscaler: {}", e)))
+                    .map(|r| Arc::new(r) as _)
+            },
+            Model::RealEsrgan => {
+                let options = RealEsrganOptions::default().model(RealEsrganOptionsModel::RealESRGANPlusx4);
+                RealEsrgan::new(options)
+                    .map_err(|e| Error::new(format!("Failed to initialize RealEsrgan upscaler: {}", e)))
+                    .map(|r| Arc::new(r) as _)
+            },
+            Model::RealEsrganAnime => {
+                let options = RealEsrganOptions::default().model(RealEsrganOptionsModel::RealESRGANPlusx4Anime);
+                RealEsrgan::new(options)
+                    .map_err(|e| Error::new(format!("Failed to initialize RealEsrganAnime upscaler: {}", e)))
+                    .map(|r| Arc::new(r) as _)
+            },
+        }
+    }
+
     fn process_frame(
-        mut frame: Frame,
-        processing: &Arc<Mutex<Vec<usize>>>,
+        frame: Frame,
         upscaler: &Arc<dyn Upscaler>,
-        shutdown_flag: &Arc<AtomicBool>,
         scale: u8,
-    ) -> Result<Option<Frame>, Error> {
-        processing.lock().expect("Failed to lock queue").push(frame.index);
+    ) -> Result<Frame, Error> {
         let width = frame.image.width();
         let height = frame.image.height();
         let frame_pixels = frame.image.to_rgb8().into_raw();
@@ -32,22 +86,10 @@ impl Upscale {
             height * scale as u32,
             upscaled_pixels
         ).unwrap();
-        frame.image = image::DynamicImage::ImageRgb8(upscaled_image);
-        loop {
-            let min_index = {
-                let queue = processing.lock().expect("Failed to lock queue");
-                *queue.iter().min().unwrap_or(&0)
-            };
-
-            if min_index == frame.index {
-                let mut queue = processing.lock().expect("Failed to lock queue");
-                queue.retain(|&x| x != frame.index);
-                return Ok(Some(frame));
-            } else if shutdown_flag.load(Ordering::SeqCst) {
-                return Ok(None);
-            }
-            std::thread::yield_now();
-        }
+        Ok(Frame {
+            image: image::DynamicImage::ImageRgb8(upscaled_image),
+            ..frame
+        })
     }
 
     fn process_incoming_frames(
@@ -55,51 +97,78 @@ impl Upscale {
         sender: Sender<Result<Frame, Error>>,
         upscaler: Arc<dyn Upscaler>,
         scale: u8,
+        next_frame_index: Arc<AtomicUsize>,
+        processed_frames: Arc<Mutex<BTreeMap<usize, Frame>>>,
     ) {
-        let processing = Arc::new(Mutex::new(Vec::new()));
-        let shutdown_flag = Arc::new(AtomicBool::new(false));
-        while !shutdown_flag.load(Ordering::SeqCst) {
-            match receiver.try_recv() {
-                Ok(Ok(frame)) => {
-                    match Self::process_frame(frame, &processing, &upscaler, &shutdown_flag, scale) {
-                        Ok(Some(processed_frame)) => {
-                            if sender.send(Ok(processed_frame)).is_err() {
-                                break;
+        while let Ok(frame_result) = receiver.recv() {
+            match frame_result {
+                Ok(frame) => {
+                    match Self::process_frame(frame, &upscaler, scale) {
+                        Ok(processed_frame) => {
+                            let mut processed_frames = processed_frames.lock().unwrap();
+                            processed_frames.insert(processed_frame.index, processed_frame);
+                            while let Some(frame) = processed_frames.remove(&next_frame_index.load(Ordering::SeqCst)) {
+                                let duplicates = frame.duplicates;
+                                if sender.send(Ok(frame)).is_err() {
+                                    return;
+                                }
+                                next_frame_index.fetch_add(1 + duplicates, Ordering::SeqCst);
                             }
                         }
-                        Ok(None) => break,
                         Err(e) => {
                             let _ = sender.send(Err(e));
-                            break;
+                            return;
                         }
                     }
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     let _ = sender.send(Err(e));
-                    break;
+                    return;
                 }
-                Err(TryRecvError::Empty) => std::thread::yield_now(),
-                Err(TryRecvError::Disconnected) => break,
             }
         }
-        shutdown_flag.store(true, Ordering::SeqCst);
     }
 
-    pub fn execute(video: &Video, frames_receiver: Receiver<Result<Frame, Error>>) -> Receiver<Result<Frame, Error>> {
-        let model = video.model.as_ref().unwrap();
-        let scale = model.get_scale();
-        if scale == 1 {
-            // to implement
-        }
-        let (sender, receiver) = bounded(1);
-        let upscaler = model.create().unwrap();
+    fn spawn_worker_threads(
+        frames_receiver: Receiver<Result<Frame, Error>>,
+        upscaler: Arc<dyn Upscaler>,
+        scale: u8,
+    ) -> Receiver<Result<Frame, Error>> {
+        let (sender, receiver) = bounded(Self::MAX_JOBS);
+        let next_frame_index = Arc::new(AtomicUsize::new(0));
+        let processed_frames = Arc::new(Mutex::new(BTreeMap::new()));
+
         for _ in 0..Self::MAX_JOBS {
             let upscaler = upscaler.clone();
             let sender = sender.clone();
             let frames_receiver = frames_receiver.clone();
-            thread::spawn(move || Self::process_incoming_frames(frames_receiver, sender, upscaler, scale));
+            let next_frame_index = next_frame_index.clone();
+            let processed_frames = processed_frames.clone();
+
+            thread::spawn(move || {
+                Self::process_incoming_frames(
+                    frames_receiver,
+                    sender,
+                    upscaler,
+                    scale,
+                    next_frame_index,
+                    processed_frames,
+                )
+            });
         }
+
         receiver
     }
 
+    pub fn execute(video: &Video, frames_receiver: Receiver<Result<Frame, Error>>) -> Result<Receiver<Result<Frame, Error>>, Error> {
+        let model = video.model.as_ref().ok_or_else(|| Error::new("No upscaling model specified"))?;
+        let scale = model.get_scale();
+        if scale == 1 {
+            return Err(Error::new("Upscale scale must be greater than 1"));
+        }
+
+        let upscaler = Self::init_upscaler(model)?;
+        let receiver = Self::spawn_worker_threads(frames_receiver, upscaler, scale);
+        Ok(receiver)
+    }
 }

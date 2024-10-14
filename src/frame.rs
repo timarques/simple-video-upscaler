@@ -2,7 +2,7 @@ use crate::error::Error;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::io::Cursor;
-use image::{DynamicImage, GenericImageView, ImageFormat};
+use image::{DynamicImage, ImageFormat};
 
 static COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -23,27 +23,20 @@ impl Frame {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        let image = image::load_from_memory_with_format(bytes, ImageFormat::Png)?;
-        Ok(Self::new(image))
+        image::load_from_memory_with_format(bytes, ImageFormat::Png)
+            .map_err(|e| Error::new(format!("Failed to load image from bytes: {}", e)))
+            .map(Self::new)
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut cursor = Cursor::new(Vec::new());
-        self.image.write_to(&mut cursor, ImageFormat::Png)?;
+        self.image.write_to(&mut cursor, ImageFormat::Png)
+            .map_err(|e| Error::new(format!("Failed to write image to bytes: {}", e)))?;
         Ok(cursor.into_inner())
     }
 
     pub fn add_duplicate(&mut self) {
         self.duplicates += 1;
-    }
-
-    pub fn is_duplicate(&self, frame: &Frame) -> bool {
-        let (width, height) = self.image.dimensions();
-        if (width, height) != frame.image.dimensions() {
-            return false;
-        }
-    
-        self.image.pixels().zip(frame.image.pixels()).all(|(p1, p2)| p1 == p2)
     }
 }
 

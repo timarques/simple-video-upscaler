@@ -11,7 +11,8 @@ pub struct Arguments {
     pub width: Option<usize>,
     pub height: Option<usize>,
     pub encoder: String,
-    pub model: String
+    pub model: String,
+    pub duplicate_threshold: f64
 }
 
 impl Default for Arguments {
@@ -30,6 +31,7 @@ impl Default for Arguments {
             files: Vec::new(),
             formats,
             model: String::from("realesrgan"),
+            duplicate_threshold: 1.0
         }
     }
 }
@@ -49,9 +51,14 @@ impl Arguments {
         Ok(arguments)
     }
 
+    fn get_next_arg(&self, args: &[String], index: &mut usize, arg_name: &str) -> Result<String, Error> {
+        *index += 1;
+        args.get(*index).cloned().ok_or_else(|| Error::new(format!("Missing value for argument: {}", arg_name)))
+    }
+    
     fn parse_arguments(&mut self) -> Result<(), Error> {
         let args: Vec<String> = std::env::args().collect();
-
+    
         if args.len() < 2 {
             Self::print_help();
         }
@@ -65,69 +72,59 @@ impl Arguments {
                 "-h" | "--height" => self.height = Some(self.parse_numeric_arg(&args, &mut i, "height")?),
                 "-e" | "--encoder" => self.encoder = self.get_next_arg(&args, &mut i, "encoder")?,
                 "-m" | "--model" => self.model = self.get_next_arg(&args, &mut i, "model")?,
+                "--duplicate_threshold" => self.duplicate_threshold = self.parse_numeric_arg(&args, &mut i, "duplicate_threshold")?,
                 "--help" => Self::print_help(),
-                _ => return Err(Error::InvalidArgument(args[i].to_string())),
+                _ => return Err(Error::new(format!("Invalid argument: {}", args[i]))),
             }
             i += 1;
         }
-
+    
         Ok(())
-    }
-
-    fn get_next_arg(&self, args: &[String], index: &mut usize, arg_name: &str) -> Result<String, Error> {
-        *index += 1;
-        args.get(*index).cloned().ok_or_else(|| Error::EmptyArgument(arg_name.to_string()))
-    }
-
-    fn parse_numeric_arg(&self, args: &[String], index: &mut usize, arg_name: &str) -> Result<usize, Error> {
-        let value = self.get_next_arg(args, index, arg_name)?;
-        value.parse().map_err(|_| Error::InvalidArgument(arg_name.to_string()))
     }
 
     fn print_help() {
         println!("Usage: program_name [OPTIONS]");
         println!();
         println!("Options:");
-        println!("  -i, --input FILE         Specify the input video file or directory");
-        println!("  -o, --output FILE        Specify the output video file");
-        println!("  -w, --width WIDTH        Set the target video width (in pixels)");
-        println!("  -h, --height HEIGHT      Set the target video height (in pixels)");
-        println!("  -e, --encoder ENCODER    Choose the video encoder (default: libx264)");
-        println!("  -m, --model MODEL        Select the AI model for upscaling: (default: realesrgan)");
-        println!("                           realcugan | realesrgan | realesrgan-anime | realesr-anime");
-        println!("      --help               Display this help message and exit");
+        println!("  -i, --input FILE           Specify the input video file or directory");
+        println!("  -o, --output FILE          Specify the output video file");
+        println!("  -w, --width WIDTH          Set the target video width (in pixels)");
+        println!("  -h, --height HEIGHT        Set the target video height (in pixels)");
+        println!("  -e, --encoder ENCODER      Choose the video encoder (default: libx264)");
+        println!("  -m, --model MODEL          Select the AI model for upscaling: (default: realesrgan)");
+        println!("                             realcugan | realesrgan | realesrgan-anime | realesr-anime");
+        println!("      --duplicate_threshold  Set the similarity threshold for identifying duplicate frames (default: 1.0)");
+        println!("      --help                 Display this help message and exit");
         exit(0);
+    }
+
+    fn parse_numeric_arg<O: std::str::FromStr>(&self, args: &[String], index: &mut usize, arg_name: &str) -> Result<O, Error> {
+        let value = self.get_next_arg(args, index, arg_name)?;
+        value.parse().map_err(|_| Error::new(format!("Argument '{}' must be a number", arg_name)))
     }
 
     fn set_input_files(&mut self) -> Result<(), Error> {
         if self.input.is_empty() {
-            return Err(Error::InvalidInputPath);
+            return Err(Error::new("Input is empty".to_string()));
         }
         
         let path = Path::new(&self.input);
         if !path.exists() {
-            return Err(Error::InvalidInputPath);
+            return Err(Error::new(format!("Input file or directory not found: {}", path.display())));
         }
 
         let input_files = if path.is_dir() {
             self.get_files_from_directory(path)?
         } else {
-            vec![self.get_file_if_valid(path).ok_or(Error::InvalidInputPath)?]
+            vec![self.get_file_if_valid(path).ok_or_else(|| Error::new(format!("Input file not found: {}", path.display())))?]
         };
 
         if input_files.is_empty() {
-            return Err(Error::InputFilesNotFound);
+            return Err(Error::new("No valid input files found".to_string()));
         }
 
         self.files = input_files.into_iter().map(|f| (f, String::new())).collect();
         Ok(())
-    }
-
-    fn get_files_from_directory(&self, dir: &Path) -> Result<Vec<String>, Error> {
-        let files = std::fs::read_dir(dir)?
-            .filter_map(|entry| entry.ok().and_then(|e| self.get_file_if_valid(&e.path())))
-            .collect();
-        Ok(files)
     }
 
     fn get_file_if_valid(&self, path: &Path) -> Option<String> {
@@ -140,6 +137,16 @@ impl Arguments {
         }).flatten()
     }
 
+    fn get_files_from_directory(&self, dir: &Path) -> Result<Vec<String>, Error> {
+        std::fs::read_dir(dir)
+            .map_err(|e| Error::new(format!("Failed to read directory: {}", e)))?
+            .filter_map(|entry| entry.ok().and_then(|e| self.get_file_if_valid(&e.path())))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(Ok)
+            .collect()
+    }
+
     fn set_output_files(&mut self) -> Result<(), Error> {
         if let Some(output) = self.output.take() {
             self.set_output_with_path(&output)?;
@@ -148,7 +155,7 @@ impl Arguments {
         }
 
         if self.files.iter().all(|(_, output)| output.is_empty()) {
-            return Err(Error::OutputFilesNotFound);
+            return Err(Error::new(format!("Failed to create output file: {}", self.input)));
         }
     
         Ok(())
@@ -158,7 +165,7 @@ impl Arguments {
         let path = Path::new(output);
         if (path.exists() && path.is_file()) || path.extension().is_some() {
             if self.files.len() > 1 {
-                return Err(Error::InvalidOutputPath);
+                return Err(Error::new(format!("Output file already exists: {}", path.display())));
             }
             self.set_single_output_file(path)?;
         } else {
@@ -170,10 +177,11 @@ impl Arguments {
 
     fn set_single_output_file(&mut self, output_path: &Path) -> Result<(), Error> {
         if let Some(output_dir) = output_path.parent() {
-            std::fs::create_dir_all(output_dir)?;
+            std::fs::create_dir_all(output_dir)
+                .map_err(|e| Error::new(format!("Failed to create output directory: {}", e)))?;
             self.files[0].1 = output_path.to_string_lossy().into_owned();
         } else {
-            return Err(Error::InvalidOutputPath);
+            return Err(Error::new(format!("Failed to create output file: {}", output_path.display())));
         }
         Ok(())
     }
@@ -183,7 +191,8 @@ impl Arguments {
             let input_path = Path::new(input);
             *output = output_path.join(input_path.file_name().unwrap()).to_string_lossy().into_owned();
         }
-        std::fs::create_dir_all(output_path)?;
+        std::fs::create_dir_all(output_path)
+            .map_err(|e| Error::new(format!("Failed to create output directory: {}", e)))?;
         Ok(())
     }
 
@@ -201,7 +210,7 @@ impl Arguments {
 
     fn check_ffmpeg(&self) -> Result<(), Error> {
         match Command::new("ffmpeg").spawn() {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::FFmpegNotAvailable),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::new(format!("Cannot find ffmpeg: {}", &e))),
             Err(_) => Ok(()),
             Ok(mut c) => {
                 let _ = c.kill();
@@ -213,20 +222,20 @@ impl Arguments {
     fn validate_model(&self) -> Result<(), Error> {
         match self.model.as_str() {
             "realcugan" | "realesrgan" | "realesrgan-anime" | "realesr-anime" => Ok(()),
-            _ => Err(Error::InvalidArgument(format!("model must be realcugan, realesrgan, realesrgan-anime or realesr-anime, got {}", self.model))),
+            _ => Err(Error::new(format!("Invalid model: {}. Must be realcugan, realesrgan, realesrgan-anime or realesr-anime", self.model))),
         }
     }
 
     fn validate_resolution_and_scale(&mut self) -> Result<(), Error> {
         if let Some(width) = self.width {
             if width < 16 || width > 7680 {
-                return Err(Error::InvalidArgument(format!("width must be between 16 and 7680, got {}", width)));
+                return Err(Error::new(format!("Invalid width: {}. Must be between 16 and 7680", width)));
             }
         }
     
         if let Some(height) = self.height {
             if height < 16 || height > 4320 {
-                return Err(Error::InvalidArgument(format!("height must be between 16 and 4320, got {}", height)));
+                return Err(Error::new(format!("Invalid height: {}. Must be between 16 and 4320", height)));
             }
         }
     
@@ -237,12 +246,12 @@ impl Arguments {
         let output = Command::new("ffmpeg")
             .args(&["-hide_banner", "-encoders"])
             .output()
-            .map_err(|_| Error::FfmpegFailed)?;
+            .map_err(|e| Error::new(format!("Failed to execute ffmpeg: {}", e)))?;
 
         let encoders = String::from_utf8_lossy(&output.stdout);
         
         if !encoders.contains(&self.encoder) {
-            return Err(Error::UnsupportedEncoder(self.encoder.clone()));
+            return Err(Error::new(format!("Invalid encoder: {}. Available encoders: {}", self.encoder, encoders)));
         }
 
         Ok(())

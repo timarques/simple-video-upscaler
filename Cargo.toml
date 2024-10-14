@@ -4,11 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-image = { version = "0.25.2", default-features = false, features = ["png"] }
 crossbeam-channel = "0.5.13"
 indicatif = "0.17.8"
 thiserror = "1.0.64"
 image-compare = "0.4.1"
+
+[dependencies.image]
+version = "0.25.2"
+default-features = false
+features = ["png"]
 
 [dependencies.realesrgan_rs]
 git = "https://github.com/timarques/realesrgan_rs"

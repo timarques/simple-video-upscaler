@@ -38,7 +38,7 @@ impl Extract {
             .stderr(Stdio::null())
             .stdin(Stdio::null())
             .spawn()
-            .map_err(|_| Error::FfmpegFailed)
+            .map_err(|e| Error::new(format!("Failed to spawn ffmpeg process: {}", e)))
     }
 
     fn process_chunk(
@@ -46,7 +46,9 @@ impl Extract {
         read_chunk: &mut Vec<u8>,
         stdout: &mut ChildStdout,
     ) -> Result<Option<Frame>, Error> {
-        let size = stdout.read(read_chunk)?;
+        let size = stdout
+            .read(read_chunk)
+            .map_err(|e| Error::new(format!("Failed to read chunk: {}", e)))?;
         if size == 0 {
             return Ok(None);
         }
@@ -56,7 +58,7 @@ impl Extract {
             let frame = Frame::from_bytes(&bytes)?;
             Ok(Some(frame))
         } else if frame_buffer.len() > Self::MAX_FRAME_BUFFER_SIZE {
-            Err(Error::FrameBufferOverflow)
+            Err(Error::new(format!("Frame buffer is too large: {}", frame_buffer.len())))
         } else {
             Self::process_chunk(frame_buffer, read_chunk, stdout)
         }

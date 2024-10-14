@@ -35,7 +35,7 @@ impl Merge {
             .stderr(Stdio::null())
             .stdout(Stdio::null())
             .spawn()
-            .map_err(Error::Io)
+            .map_err(|e| Error::new(format!("Failed to spawn ffmpeg process: {}", e)))
     }
 
     fn process_stdin(mut stdin: ChildStdin, receiver: Receiver<Result<Frame, Error>>) -> Result<(), Error> {
@@ -43,9 +43,8 @@ impl Merge {
             match receiver.try_recv() {
                 Ok(Ok(frame)) => {
                     let bytes = frame.to_bytes()?;
-                    for i in 0..(frame.duplicates + 1) {
-                        stdin.write_all(&bytes).map_err(Error::Io)?;
-                        let _ = std::fs::write(format!("/tmp/frames/{:06}", frame.index + i), &bytes);
+                    for _ in 0..(frame.duplicates + 1) {
+                        stdin.write_all(&bytes).map_err(|e| Error::new(format!("Failed to write to stdin: {}", e)))?;
                     }
                 }
                 Ok(Err(e)) => return Err(e),

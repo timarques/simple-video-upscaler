@@ -14,6 +14,7 @@ pub struct Video<'a> {
     pub input: &'a str,
     pub output: &'a str,
     pub encoder: &'a str,
+    pub duplicate_threshold: f64,
 }
 
 impl<'a> Video<'a> {
@@ -27,6 +28,7 @@ impl<'a> Video<'a> {
             input,
             output,
             encoder: &arguments.encoder,
+            duplicate_threshold: arguments.duplicate_threshold,
         };
 
         video.fetch_video_metadata()?;
@@ -35,14 +37,16 @@ impl<'a> Video<'a> {
         Ok(video)
     }
 
-    fn parse_frame_rate(value: &str) -> f64 {
+    fn parse_frame_rate(value: &str) -> Result<f64, Error> {
         let fps_parts: Vec<&str> = value.split('/').collect();
         if fps_parts.len() == 2 {
-            let num = fps_parts[0].parse::<f64>().unwrap_or(0.0);
-            let den = fps_parts[1].parse::<f64>().unwrap_or(1.0);
-            num / den
+            let num = fps_parts[0].parse::<f64>()
+                .map_err(|_| Error::new(format!("Failed to parse frame rate numerator: {}", fps_parts[0])))?;
+            let den = fps_parts[1].parse::<f64>()
+                .map_err(|_| Error::new(format!("Failed to parse frame rate denominator: {}", fps_parts[1])))?;
+            Ok(num / den)
         } else {
-            0.0
+            Err(Error::new(format!("Invalid frame rate format: {}", value)))
         }
     }
 
@@ -56,17 +60,22 @@ impl<'a> Video<'a> {
                 "-of", "default=noprint_wrappers=1",
                 self.input,
             ])
-            .output()?;
+            .output()
+            .map_err(|e| Error::new(format!("Failed to execute ffprobe: {}", e)))?;
 
-        let data = String::from_utf8_lossy(&output.stdout);
+        let data = String::from_utf8(output.stdout)
+            .map_err(|e| Error::new(format!("Failed to parse ffprobe output: {}", e)))?;
         
         for line in data.lines() {
             if let Some((key, value)) = line.split_once('=') {
                 match key {
-                    "nb_read_frames" => self.frame_count = value.parse().unwrap_or(0),
-                    "r_frame_rate" => self.frame_rate = Self::parse_frame_rate(value),
-                    "width" => self.width = value.parse().unwrap_or(0),
-                    "height" => self.height = value.parse().unwrap_or(0),
+                    "nb_read_frames" => self.frame_count = value.parse()
+                        .map_err(|_| Error::new(format!("Failed to parse frame count: {}", value)))?,
+                    "r_frame_rate" => self.frame_rate = Self::parse_frame_rate(value)?,
+                    "width" => self.width = value.parse()
+                        .map_err(|_| Error::new(format!("Failed to parse width: {}", value)))?,
+                    "height" => self.height = value.parse()
+                        .map_err(|_| Error::new(format!("Failed to parse height: {}", value)))?,
                     _ => {}
                 }
             }
@@ -109,24 +118,21 @@ impl<'a> Video<'a> {
             4
         } else {
             1 + (0..=3).rev()
-            .find(|&scale| final_width > self.width * scale || final_height > self.height * scale)
-            .unwrap_or(0)
+                .find(|&scale| final_width > self.width * scale || final_height > self.height * scale)
+                .unwrap_or(0)
         };
 
         self.width = final_width.min(final_width * scale);
         self.height = final_height.min(final_height * scale);
 
-        if scale < 2 {
-            self.model = None;
-        } else if arguments.model == "realcugan" {
-            self.model = Some(Model::RealCugan(scale as u8));
-        } else if arguments.model == "realesr-anime" {
-            self.model = Some(Model::RealEsrAnime(scale as u8));
-        } else if arguments.model == "realesrgan" {
-            self.model = Some(Model::RealEsrgan);
-        } else if arguments.model == "realesrgan-anime" {
-            self.model = Some(Model::RealEsrganAnime);
-        }
+        self.model = match (scale, arguments.model.as_str()) {
+            (1, _) => None,
+            (_, "realcugan") => Some(Model::RealCugan(scale as u8)),
+            (_, "realesr-anime") => Some(Model::RealEsrAnime(scale as u8)),
+            (_, "realesrgan") => Some(Model::RealEsrgan),
+            (_, "realesrgan-anime") => Some(Model::RealEsrganAnime),
+            _ => None,
+        };
 
         self.warn_if_resolution_adjusted(arguments, final_width, final_height);
     }
@@ -143,5 +149,4 @@ impl<'a> Video<'a> {
             );
         }
     }
-
 }
