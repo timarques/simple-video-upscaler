@@ -21,6 +21,7 @@ pub enum Error {
     MissingArgument(String),
     UnsupportedEncoder(String),
     MixedArguments(String, String),
+    ModelCreationError(String),
 }
 
 impl fmt::Display for Error {
@@ -43,6 +44,7 @@ impl fmt::Display for Error {
             Error::InvalidArgument(arg) => write!(f, "Invalid argument provided: {}", arg),
             Error::MissingArgument(arg) => write!(f, "Required argument is missing: {}", arg),
             Error::UnsupportedEncoder(encoder) => write!(f, "The encoder is not supported: {}", encoder),
+            Error::ModelCreationError(model) => write!(f, "Failed to create model: {}", model),
         }
     }
 }

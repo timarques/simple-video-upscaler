@@ -6,31 +6,41 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Model {
-    RealCugan(usize),
+    RealCugan(u8),
+    RealEsrAnime(u8),
     RealEsrgan,
     RealEsrganAnime,
 }
 
 impl Model {
-    pub fn create(&self) -> Arc<dyn Upscaler> {
+    pub fn create(&self) -> Result<Arc<dyn Upscaler>, Error> {
         match self {
             Model::RealCugan(scale) => {
-                let model = match scale {
+                let options = RealCuganOptions::default().model(match scale {
                     2 => RealCuganOptionsModel::Se2xConservative,
                     3 => RealCuganOptionsModel::Se3xConservative,
                     4 => RealCuganOptionsModel::Se4xConservative,
                     _ => unreachable!(),
-                };
-                let options = RealCuganOptions::default().model(model);
-                Arc::new(RealCugan::new(options).unwrap())
+                });
+                println!("teste");
+                RealCugan::new(options).map_err(|e| Error::ModelCreationError(e)).map(|r| Arc::new(r) as _)
+            },
+            Model::RealEsrAnime(scale) => {
+                let options = RealEsrganOptions::default().model(match scale {
+                    2 => RealEsrganOptionsModel::RealESRAnimeVideoV3x2,
+                    3 => RealEsrganOptionsModel::RealESRAnimeVideoV3x3,
+                    4 => RealEsrganOptionsModel::RealESRAnimeVideoV3x4,
+                    _ => unreachable!(),
+                });
+                RealEsrgan::new(options).map_err(|e| Error::ModelCreationError(e)).map(|r| Arc::new(r) as _)
             },
             Model::RealEsrgan => {
                 let options = RealEsrganOptions::default().model(RealEsrganOptionsModel::RealESRGANPlusx4);
-                Arc::new(RealEsrgan::new(options).unwrap())
+                RealEsrgan::new(options).map_err(|e| Error::ModelCreationError(e)).map(|r| Arc::new(r) as _)
             },
             Model::RealEsrganAnime => {
                 let options = RealEsrganOptions::default().model(RealEsrganOptionsModel::RealESRGANPlusx4Anime);
-                Arc::new(RealEsrgan::new(options).unwrap())
+                RealEsrgan::new(options).map_err(|e| Error::ModelCreationError(e)).map(|r| Arc::new(r) as _)
             },
         }
     }
@@ -40,6 +50,7 @@ impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Model::RealCugan(scale) => write!(f, "realcugan-x{}", scale),
+            Model::RealEsrAnime(scale) => write!(f, "realesr-anime-x{}", scale),
             Model::RealEsrgan => write!(f, "realesrgan-x4"),
             Model::RealEsrganAnime => write!(f, "realesrgan-anime-x4"),
         }

@@ -94,7 +94,7 @@ impl Arguments {
         println!("  -h, --height HEIGHT      Set the target video height (in pixels)");
         println!("  -e, --encoder ENCODER    Choose the video encoder (default: libx264)");
         println!("  -m, --model MODEL        Select the AI model for upscaling: (default: realesrgan)");
-        println!("                           realcugan | realesrgan | realesrgan-anime");
+        println!("                           realcugan | realesrgan | realesrgan-anime | realesr-anime");
         println!("      --help               Display this help message and exit");
         exit(0);
     }
@@ -212,8 +212,8 @@ impl Arguments {
 
     fn validate_model(&self) -> Result<(), Error> {
         match self.model.as_str() {
-            "realcugan" | "realesrgan" | "realesrgan-anime" => Ok(()),
-            _ => Err(Error::InvalidArgument(format!("model must be realcugan, realesrgan, or realesrgan-anime, got {}", self.model))),
+            "realcugan" | "realesrgan" | "realesrgan-anime" | "realesr-anime" => Ok(()),
+            _ => Err(Error::InvalidArgument(format!("model must be realcugan, realesrgan, realesrgan-anime or realesr-anime, got {}", self.model))),
         }
     }
 

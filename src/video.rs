@@ -35,6 +35,17 @@ impl<'a> Video<'a> {
         Ok(video)
     }
 
+    fn parse_frame_rate(value: &str) -> f64 {
+        let fps_parts: Vec<&str> = value.split('/').collect();
+        if fps_parts.len() == 2 {
+            let num = fps_parts[0].parse::<f64>().unwrap_or(0.0);
+            let den = fps_parts[1].parse::<f64>().unwrap_or(1.0);
+            num / den
+        } else {
+            0.0
+        }
+    }
+
     fn fetch_video_metadata(&mut self) -> Result<(), Error> {
         let output = Command::new("ffprobe")
             .args(&[
@@ -64,46 +75,6 @@ impl<'a> Video<'a> {
         Ok(())
     }
 
-    fn parse_frame_rate(value: &str) -> f64 {
-        let fps_parts: Vec<&str> = value.split('/').collect();
-        if fps_parts.len() == 2 {
-            let num = fps_parts[0].parse::<f64>().unwrap_or(0.0);
-            let den = fps_parts[1].parse::<f64>().unwrap_or(1.0);
-            num / den
-        } else {
-            0.0
-        }
-    }
-
-    fn set_model_and_resolution(&mut self, arguments: &Arguments) {
-        let original_aspect_ratio = self.width as f64 / self.height as f64;
-        let (target_width, target_height) = self.calculate_target_dimensions(arguments, original_aspect_ratio);
-        let (final_width, final_height) = self.adjust_for_aspect_ratio(target_width, target_height, original_aspect_ratio);
-
-        let scale = if arguments.model != "realcugan" {
-            4
-        } else {
-            1 + (0..=3).rev()
-            .find(|&scale| final_width >= self.width * scale || final_height >= self.height * scale)
-            .unwrap_or(1)
-        };
-
-        self.width = final_width.min(final_width * scale);
-        self.height = final_height.min(final_height * scale);
-
-        if scale < 2 {
-            self.model = None;
-        } else if arguments.model == "realcugan" {
-            self.model = Some(Model::RealCugan(scale));
-        } else if arguments.model == "realesrgan" {
-            self.model = Some(Model::RealEsrgan);
-        } else if arguments.model == "realesrgan-anime" {
-            self.model = Some(Model::RealEsrganAnime);
-        }
-
-        self.warn_if_resolution_adjusted(arguments, final_width, final_height);
-    }
-
     fn calculate_target_dimensions(&self, arguments: &Arguments, original_aspect_ratio: f64) -> (usize, usize) {
         match (arguments.width, arguments.height) {
             (Some(w), Some(h)) => (w, h),
@@ -127,6 +98,37 @@ impl<'a> Video<'a> {
             let new_height = (width as f64 / original_aspect_ratio).round() as usize;
             (width, new_height)
         }
+    }
+
+    fn set_model_and_resolution(&mut self, arguments: &Arguments) { 
+        let original_aspect_ratio = self.width as f64 / self.height as f64;
+        let (target_width, target_height) = self.calculate_target_dimensions(arguments, original_aspect_ratio);
+        let (final_width, final_height) = self.adjust_for_aspect_ratio(target_width, target_height, original_aspect_ratio);
+
+        let scale = if arguments.model != "realcugan" && arguments.model != "realesr-anime" {
+            4
+        } else {
+            1 + (0..=3).rev()
+            .find(|&scale| final_width >= self.width * scale || final_height >= self.height * scale)
+            .unwrap_or(0)
+        };
+
+        self.width = final_width.min(final_width * scale);
+        self.height = final_height.min(final_height * scale);
+
+        if scale < 2 {
+            self.model = None;
+        } else if arguments.model == "realcugan" {
+            self.model = Some(Model::RealCugan(scale as u8));
+        } else if arguments.model == "realesr-anime" {
+            self.model = Some(Model::RealEsrAnime(scale as u8));
+        } else if arguments.model == "realesrgan" {
+            self.model = Some(Model::RealEsrgan);
+        } else if arguments.model == "realesrgan-anime" {
+            self.model = Some(Model::RealEsrganAnime);
+        }
+
+        self.warn_if_resolution_adjusted(arguments, final_width, final_height);
     }
 
     fn warn_if_resolution_adjusted(&self, arguments: &Arguments, final_width: usize, final_height: usize) {

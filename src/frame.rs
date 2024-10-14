@@ -2,7 +2,7 @@ use crate::error::Error;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::io::Cursor;
-use image::{DynamicImage, GenericImageView, ImageFormat};
+use image::{DynamicImage, ImageFormat};
 
 static COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -38,11 +38,13 @@ impl Frame {
     }
 
     pub fn is_duplicate(&self, frame: &Frame) -> bool {
-        let (width, height) = self.image.dimensions();
-        if (width, height) != frame.image.dimensions() {
-            return false;
+        let result = image_compare::rgb_hybrid_compare(&self.image.to_rgb8(), &frame.image.to_rgb8());
+        if let Ok(result) = result {
+            if result.score > 0.98 {
+                return true
+            }
         }
-        self.image.pixels().zip(frame.image.pixels()).all(|(p1, p2)| p1 == p2)
+        false
     }
 }
 

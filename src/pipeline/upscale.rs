@@ -13,7 +13,7 @@ pub struct Upscale;
 
 impl Upscale {
 
-    const MAX_JOBS: usize = 2;
+    const MAX_JOBS: usize = 4;
 
     fn process_frame(
         mut frame: Frame,
@@ -24,10 +24,10 @@ impl Upscale {
         processing.lock().expect("Failed to lock queue").push(frame.index);
         let width = frame.image.width();
         let height = frame.image.height();
-        let frame_pixels = frame.image.to_rgba8().into_raw();
+        let frame_pixels = frame.image.to_rgb8().into_raw();
         let upscaled_pixels = upscaler.upscale(&frame_pixels, width as usize, height as usize)?;
-        let upscaled_image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(width, height, upscaled_pixels).unwrap());
-        frame.image = upscaled_image;
+        let upscaled_image = image::ImageBuffer::from_raw(width, height, upscaled_pixels).unwrap();
+        frame.image = image::DynamicImage::ImageRgb8(upscaled_image);
         
         loop {
             let min_index = {
@@ -83,7 +83,7 @@ impl Upscale {
     pub fn execute(video: &Video, frames_receiver: Receiver<Result<Frame, Error>>) -> Receiver<Result<Frame, Error>> {
         let (sender, receiver) = bounded(1);
         let model = video.model.as_ref().unwrap();
-        let upscaler = model.create();
+        let upscaler = model.create().unwrap();
         for _ in 0..Self::MAX_JOBS {
             let upscaler = upscaler.clone();
             let sender = sender.clone();
