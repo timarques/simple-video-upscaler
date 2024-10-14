@@ -13,6 +13,16 @@ pub enum Model {
 }
 
 impl Model {
+
+    pub fn get_scale(&self) -> u8 {
+        match self {
+            Model::RealCugan(scale) => *scale,
+            Model::RealEsrAnime(scale) => *scale,
+            Model::RealEsrgan => 4,
+            Model::RealEsrganAnime => 4,
+        }
+    }
+
     pub fn create(&self) -> Result<Arc<dyn Upscaler>, Error> {
         match self {
             Model::RealCugan(scale) => {
@@ -22,7 +32,6 @@ impl Model {
                     4 => RealCuganOptionsModel::Se4xConservative,
                     _ => unreachable!(),
                 });
-                println!("teste");
                 RealCugan::new(options).map_err(|e| Error::ModelCreationError(e)).map(|r| Arc::new(r) as _)
             },
             Model::RealEsrAnime(scale) => {

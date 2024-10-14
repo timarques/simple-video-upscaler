@@ -43,8 +43,9 @@ impl Merge {
             match receiver.try_recv() {
                 Ok(Ok(frame)) => {
                     let bytes = frame.to_bytes()?;
-                    for _ in 0..(frame.duplicates + 1) {
+                    for i in 0..(frame.duplicates + 1) {
                         stdin.write_all(&bytes).map_err(Error::Io)?;
+                        let _ = std::fs::write(format!("/tmp/frames/{:06}", frame.index + i), &bytes);
                     }
                 }
                 Ok(Err(e)) => return Err(e),

@@ -109,7 +109,7 @@ impl<'a> Video<'a> {
             4
         } else {
             1 + (0..=3).rev()
-            .find(|&scale| final_width >= self.width * scale || final_height >= self.height * scale)
+            .find(|&scale| final_width > self.width * scale || final_height > self.height * scale)
             .unwrap_or(0)
         };
 
