@@ -15,9 +15,11 @@ impl Merge {
             .args(&[
                 "-i", &video.input,
                 "-r", &video.frame_rate.to_string(),
-                "-thread_queue_size", "1024",
+                "-thread_queue_size", "100",
                 "-f", "image2pipe",
                 "-vcodec", "png",
+                "-pix_fmt", "rgb8",
+                "-s", &format!("{}x{}", video.get_scaled_width(), video.get_scaled_height()),
                 "-i", "-",
                 "-map", "0:a",
                 "-map", "0:s?",

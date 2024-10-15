@@ -28,10 +28,10 @@ impl Extract {
                 "-r", "1",
                 "-i", &video.input,
                 "-pix_fmt", "rgb8",
-                "-q:v", "1",
+                "-q:v:0", "1",
                 "-vcodec", "png",
                 "-f", "image2pipe",
-                "-thread_queue_size", "1024",
+                "-thread_queue_size", "100",
                 "pipe:1"
             ])
             .stdout(Stdio::piped())

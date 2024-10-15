@@ -8,6 +8,8 @@ use std::process::Command;
 pub struct Video<'a> {
     pub width: usize,
     pub height: usize,
+    pub original_width: usize,
+    pub original_height: usize,
     pub frame_rate: f64,
     pub frame_count: usize,
     pub model: Option<Model>,
@@ -15,6 +17,7 @@ pub struct Video<'a> {
     pub output: &'a str,
     pub encoder: &'a str,
     pub duplicate_threshold: f64,
+    pub scale: usize,
 }
 
 impl<'a> Video<'a> {
@@ -22,8 +25,11 @@ impl<'a> Video<'a> {
         let mut video = Self {
             width: 0,
             height: 0,
+            original_width: 0,
+            original_height: 0,
             frame_rate: 0.0,
             frame_count: 0,
+            scale: 2,
             model: None,
             input,
             output,
@@ -33,8 +39,18 @@ impl<'a> Video<'a> {
 
         video.fetch_video_metadata()?;
         video.set_model_and_resolution(arguments);
+        video.set_model(arguments);
+        video.warn_if_resolution_adjusted(arguments);
 
         Ok(video)
+    }
+
+    pub fn get_scaled_width(&self) -> usize {
+        self.original_width * self.scale
+    }
+
+    pub fn get_scaled_height(&self) -> usize {
+        self.original_height * self.scale
     }
 
     fn parse_frame_rate(value: &str) -> Result<f64, Error> {
@@ -72,9 +88,9 @@ impl<'a> Video<'a> {
                     "nb_read_frames" => self.frame_count = value.parse()
                         .map_err(|_| Error::new(format!("Failed to parse frame count: {}", value)))?,
                     "r_frame_rate" => self.frame_rate = Self::parse_frame_rate(value)?,
-                    "width" => self.width = value.parse()
+                    "width" => self.original_width = value.parse()
                         .map_err(|_| Error::new(format!("Failed to parse width: {}", value)))?,
-                    "height" => self.height = value.parse()
+                    "height" => self.original_height = value.parse()
                         .map_err(|_| Error::new(format!("Failed to parse height: {}", value)))?,
                     _ => {}
                 }
@@ -89,7 +105,7 @@ impl<'a> Video<'a> {
             (Some(w), Some(h)) => (w, h),
             (Some(w), None) => (w, (w as f64 / original_aspect_ratio).round() as usize),
             (None, Some(h)) => ((h as f64 * original_aspect_ratio).round() as usize, h),
-            (None, None) => (self.width, self.height),
+            (None, None) => (self.original_width * self.scale, self.original_height * self.scale),
         }
     }
 
@@ -110,34 +126,34 @@ impl<'a> Video<'a> {
     }
 
     fn set_model_and_resolution(&mut self, arguments: &Arguments) { 
-        let original_aspect_ratio = self.width as f64 / self.height as f64;
+        let original_aspect_ratio = self.original_width as f64 / self.original_height as f64;
         let (target_width, target_height) = self.calculate_target_dimensions(arguments, original_aspect_ratio);
         let (final_width, final_height) = self.adjust_for_aspect_ratio(target_width, target_height, original_aspect_ratio);
 
-        let scale = if arguments.model != "realcugan" && arguments.model != "realesr-anime" {
+        self.scale = if arguments.model != "realcugan" && arguments.model != "realesr-anime" {
             4
         } else {
             1 + (0..=3).rev()
-                .find(|&scale| final_width > self.width * scale || final_height > self.height * scale)
+                .find(|&scale| final_width > self.original_width * scale || final_height > self.original_height * scale)
                 .unwrap_or(0)
         };
 
-        self.width = final_width.min(final_width * scale);
-        self.height = final_height.min(final_height * scale);
+        self.width = final_width.min(final_width * self.scale);
+        self.height = final_height.min(final_height * self.scale);
+    }
 
-        self.model = match (scale, arguments.model.as_str()) {
+    fn set_model(&mut self, arguments: &Arguments) {
+        self.model = match (self.scale, arguments.model.as_str()) {
             (1, _) => None,
-            (_, "realcugan") => Some(Model::RealCugan(scale as u8)),
-            (_, "realesr-anime") => Some(Model::RealEsrAnime(scale as u8)),
+            (_, "realcugan") => Some(Model::RealCugan(self.scale as u8)),
+            (_, "realesr-anime") => Some(Model::RealEsrAnime(self.scale as u8)),
             (_, "realesrgan") => Some(Model::RealEsrgan),
             (_, "realesrgan-anime") => Some(Model::RealEsrganAnime),
             _ => None,
         };
-
-        self.warn_if_resolution_adjusted(arguments, final_width, final_height);
     }
 
-    fn warn_if_resolution_adjusted(&self, arguments: &Arguments, final_width: usize, final_height: usize) {
+    fn warn_if_resolution_adjusted(&self, arguments: &Arguments) {
         let requested_width = arguments.width.unwrap_or(0);
         let requested_height = arguments.height.unwrap_or(0);
 
@@ -145,7 +161,7 @@ impl<'a> Video<'a> {
            (requested_height > 0 && self.height != requested_height) {
             println!(
                 "Warning: Resolution adjusted from {}x{} to {}x{} to maintain aspect ratio and scaling factor.",
-                requested_width, requested_height, final_width, final_height
+                requested_width, requested_height, self.width, self.height
             );
         }
     }
