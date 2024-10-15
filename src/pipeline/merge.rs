@@ -44,7 +44,9 @@ impl Merge {
                 Ok(Ok(frame)) => {
                     let bytes = frame.to_bytes()?;
                     for _ in 0..(frame.duplicates + 1) {
-                        stdin.write_all(&bytes).map_err(|e| Error::new(format!("Failed to write to stdin: {}", e)))?;
+                        stdin
+                            .write_all(&bytes)
+                            .map_err(|e| Error::new(format!("Failed to write to stdin: {}", e)))?;
                     }
                 }
                 Ok(Err(e)) => return Err(e),

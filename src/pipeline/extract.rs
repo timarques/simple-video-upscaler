@@ -26,7 +26,6 @@ impl Extract {
         Command::new("ffmpeg")
             .args(&[
                 "-r", "1",
-                "-threads", "1",
                 "-i", &video.input,
                 "-pix_fmt", "rgb8",
                 "-q:v", "1",
