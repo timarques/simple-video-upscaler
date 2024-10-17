@@ -12,7 +12,8 @@ pub struct Arguments {
     pub height: Option<usize>,
     pub encoder: String,
     pub model: String,
-    pub duplicate_threshold: f64
+    pub duplicate_threshold: f64,
+    pub replace_output: bool
 }
 
 impl Default for Arguments {
@@ -31,7 +32,8 @@ impl Default for Arguments {
             files: Vec::new(),
             formats,
             model: String::from("realesrgan"),
-            duplicate_threshold: 1.0
+            duplicate_threshold: 1.0,
+            replace_output: false
         }
     }
 }
@@ -72,6 +74,7 @@ impl Arguments {
                 "-h" | "--height" => self.height = Some(self.parse_numeric_arg(&args, &mut i, "height")?),
                 "-e" | "--encoder" => self.encoder = self.get_next_arg(&args, &mut i, "encoder")?,
                 "-m" | "--model" => self.model = self.get_next_arg(&args, &mut i, "model")?,
+                "--replace_output" => self.replace_output = true,
                 "--duplicate_threshold" => self.duplicate_threshold = self.parse_numeric_arg(&args, &mut i, "duplicate_threshold")?,
                 "--help" => Self::print_help(),
                 _ => return Err(Error::new(format!("Invalid argument: {}", args[i]))),
@@ -94,6 +97,7 @@ impl Arguments {
         println!("  -m, --model MODEL          Select the AI model for upscaling: (default: realesrgan)");
         println!("                             realcugan | realesrgan | realesrgan-anime | realesr-anime");
         println!("      --duplicate_threshold  Set the similarity threshold for identifying duplicate frames (default: 1.0)");
+        println!("      --replace_output       Replace the output file if it already exists");
         println!("      --help                 Display this help message and exit");
         exit(0);
     }
@@ -154,9 +158,22 @@ impl Arguments {
             self.set_default_output()?;
         }
 
-        if self.files.iter().all(|(_, output)| output.is_empty()) {
+        if self.files.iter().any(|(_, output)| output.is_empty()) {
             return Err(Error::new(format!("Failed to create output file: {}", self.input)));
         }
+
+        self.files = self.files
+            .clone()
+            .into_iter()
+            .filter(|(_, output)| {
+                if Path::new(output).exists() && !self.replace_output {
+                    println!("Skipping {} output file already exists", output);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
     
         Ok(())
     }

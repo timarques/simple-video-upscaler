@@ -8,8 +8,6 @@ use std::process::Command;
 pub struct Video<'a> {
     pub width: usize,
     pub height: usize,
-    pub original_width: usize,
-    pub original_height: usize,
     pub frame_rate: f64,
     pub frame_count: usize,
     pub model: Option<Model>,
@@ -18,6 +16,8 @@ pub struct Video<'a> {
     pub encoder: &'a str,
     pub duplicate_threshold: f64,
     pub scale: usize,
+    original_width: usize,
+    original_height: usize,
 }
 
 impl<'a> Video<'a> {
