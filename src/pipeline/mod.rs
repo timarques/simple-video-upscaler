@@ -1,34 +1,34 @@
 mod extract;
 mod upscale;
-mod filter_duplicates;
 mod progress;
 mod merge;
 
-use extract::Extract;
-use upscale::Upscale;
-use filter_duplicates::FilterDuplicates;
-use progress::Progress;
-use merge::Merge;
+use self::extract::ExtractPhase;
+use self::upscale::UpscalePhase;
+use self::progress::ProgressPhase;
+use self::merge::MergePhase;
 
 use crate::arguments::Arguments;
 use crate::video::Video;
-use crate::error::Error;
+use anyhow::Result;
+
+const CHANNEL_COUNT: usize = 4;
 
 pub struct Pipeline;
 
 impl Pipeline {
-    pub fn execute(arguments: Arguments) -> Result<(), Error> {
+
+    pub fn execute(arguments: Arguments) -> Result<()> {
         for (input, output) in &arguments.files {
             let video = Video::new(&arguments, input, output)?;
             if video.model.is_none() {
-                println!("Skipping {}", input);
                 continue
             }
-            let extract = Extract::execute(&video)?;
-            let filter_duplicates = FilterDuplicates::execute(&video, extract);
-            let upscale = Upscale::execute(&video, filter_duplicates)?;
-            let progress = Progress::execute(&video, upscale);
-            Merge::execute(&video, progress)?;
+            
+            let extract = ExtractPhase::execute(&video)?;
+            let upscale = UpscalePhase::execute(&video, extract)?;
+            let merge = MergePhase::execute(&video, upscale)?;
+            ProgressPhase::execute(&video, merge);
         }
         Ok(())
     }

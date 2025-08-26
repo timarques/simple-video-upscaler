@@ -1,13 +1,13 @@
 [package]
 name = "simple_video_upscaler"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 crossbeam-channel = "0.5.13"
 indicatif = "0.17.8"
-thiserror = "1.0.64"
 image-compare = "0.4.1"
+anyhow = "1.0.99"
 
 [dependencies.image]
 version = "0.25.2"
@@ -16,13 +16,15 @@ features = ["png"]
 
 [dependencies.realesrgan_rs]
 git = "https://github.com/timarques/realesrgan_rs"
+rev = "a42588d"
 default-features = false
-features = ["model-realesr-animevideov3", "model-realesrgan-plus", "model-realesrgan-plus-anime"]
+features = ["image", "model-realesr-animevideov3", "model-realesrgan-plus", "model-realesrgan-plus-anime"]
 
 [dependencies.realcugan_rs]
 git = "https://github.com/timarques/realcugan_rs"
+rev = "4a94abd"
 default-features = false
-features = ["models-se"]
+features = ["image", "models-se"]
 
 [profile.release]
 lto = true
