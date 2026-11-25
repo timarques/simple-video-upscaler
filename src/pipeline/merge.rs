@@ -3,7 +3,7 @@ use crate::frame::Frame;
 use crate::reorderer::Reorderer;
 use crate::video::Video;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
@@ -18,12 +18,11 @@ struct IoPipeline {
 }
 
 impl IoPipeline {
-
     fn new(process: Child, stdin: ChildStdin, final_frame_sender: Sender<Result<Frame>>) -> Self {
         let writer = BufWriter::new(stdin);
         let reorderer = Reorderer::new();
         let bytes_buffer = HashMap::new();
-        
+
         Self {
             process,
             writer,
@@ -41,7 +40,7 @@ impl IoPipeline {
         }
         self.finalize()
     }
-    
+
     fn buffer_frame(&mut self, frame: Frame, bytes: Vec<u8>) {
         self.bytes_buffer.insert(frame.index, bytes);
         self.reorderer.push(frame);
@@ -50,10 +49,11 @@ impl IoPipeline {
     fn write_ready_frames(&mut self) -> Result<()> {
         while let Some(ready_frame) = self.reorderer.pop() {
             let frame_index = ready_frame.index;
-            let ready_bytes = self.bytes_buffer
+            let ready_bytes = self
+                .bytes_buffer
                 .remove(&frame_index)
                 .context(format!("Byte data for frame {frame_index} not in buffer"))?;
-            
+
             self.writer.write_all(&ready_bytes)?;
             self.final_frame_sender.send(Ok(ready_frame))?;
         }
@@ -77,11 +77,9 @@ impl IoPipeline {
     }
 }
 
-
 pub struct MergePhase;
 
 impl MergePhase {
-
     pub fn execute(
         video: &Video,
         frame_receiver: Receiver<Result<Frame>>,
@@ -141,20 +139,44 @@ impl MergePhase {
 
         Command::new("ffmpeg")
             .args([
-                "-hide_banner", "-loglevel", "error", "-y",
-                "-i", video.input,
-                "-thread_queue_size", "1024",
-                "-f", "image2pipe", "-vcodec", "png", "-pix_fmt", "rgb24",
-                "-s", &input_dims,
-                "-framerate", &video.frame_rate.to_string(),
-                "-i", "-",
-                "-map", "0:a?", "-map", "0:s?", "-map", "1:v",
-                "-map_metadata", "0",
-                "-vf", &scale_filter,
-                "-pix_fmt", "yuv420p",
-                "-c:v", video.encoder,
-                "-c:a", "copy",
-                "-c:s", "copy",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                video.input,
+                "-thread_queue_size",
+                "1024",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "png",
+                "-pix_fmt",
+                "rgb24",
+                "-s",
+                &input_dims,
+                "-framerate",
+                &video.frame_rate.to_string(),
+                "-i",
+                "-",
+                "-map",
+                "0:a?",
+                "-map",
+                "0:s?",
+                "-map",
+                "1:v",
+                "-map_metadata",
+                "0",
+                "-vf",
+                &scale_filter,
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                video.encoder,
+                "-c:a",
+                "copy",
+                "-c:s",
+                "copy",
                 video.output,
             ])
             .stdin(Stdio::piped())

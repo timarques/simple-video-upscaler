@@ -1,6 +1,6 @@
-use std::io::Cursor;
-use image::{DynamicImage, ImageFormat};
 use anyhow::{Context, Result};
+use image::{DynamicImage, ImageFormat};
+use std::io::Cursor;
 
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -10,10 +10,7 @@ pub struct Frame {
 
 impl Frame {
     pub fn new(index: usize, image: DynamicImage) -> Self {
-        Self {
-            index,
-            image
-        }
+        Self { index, image }
     }
 
     pub fn from_bytes(index: usize, bytes: &[u8]) -> Result<Self> {
@@ -31,5 +28,4 @@ impl Frame {
 
         Ok(cursor.into_inner())
     }
-
 }

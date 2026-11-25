@@ -42,11 +42,11 @@ impl Reorderer {
     }
 
     pub fn pop(&mut self) -> Option<Frame> {
-        if let Some(peeked) = self.heap.peek() {
-            if peeked.0.0.index == self.expected_index {
-                self.expected_index += 1;
-                return self.heap.pop().map(|reversed_item| reversed_item.0.0);
-            }
+        if let Some(peeked) = self.heap.peek()
+            && peeked.0.0.index == self.expected_index
+        {
+            self.expected_index += 1;
+            return self.heap.pop().map(|reversed_item| reversed_item.0.0);
         }
         None
     }

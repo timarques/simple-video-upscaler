@@ -1,10 +1,10 @@
-mod frame;
-mod pipeline;
 mod arguments;
-mod video;
+mod frame;
 mod model;
-mod upscaler;
+mod pipeline;
 mod reorderer;
+mod upscaler;
+mod video;
 
 use arguments::Arguments;
 use pipeline::Pipeline;
