@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
   rust:
@@ -29,5 +31,5 @@ jobs:
           fi
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets
+      - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
