@@ -15,7 +15,7 @@ features = ["png"]
 
 [dependencies.upscaler]
 git = "ssh://git@github.com/timarques/upscaler.git"
-rev = "1ad415f"
+rev = "4743e23"
 default-features = false
 features = ["realesrgan", "realcugan", "models", "image"]
 
