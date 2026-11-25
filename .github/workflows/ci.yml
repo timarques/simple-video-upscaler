@@ -26,8 +26,8 @@ jobs:
           DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
         run: |
           if [ -n "${DEPS_TOKEN:-}" ]; then
-            git config --global url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
-            git config --global url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
+            git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+            git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
           fi
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
