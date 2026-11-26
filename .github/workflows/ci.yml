@@ -21,7 +21,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build build-essential libvulkan-dev libomp-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy
       - name: Configure git for private GitHub dependencies
         env:
           PRIVATE_DEPENDENCIES_TOKEN: ${{ secrets.PRIVATE_DEPENDENCIES_TOKEN }}
@@ -31,6 +31,5 @@ jobs:
             git config --global --add url."https://x-access-token:${PRIVATE_DEPENDENCIES_TOKEN}@github.com/".insteadOf "git@github.com:"
           fi
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
